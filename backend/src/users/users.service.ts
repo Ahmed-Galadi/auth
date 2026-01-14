@@ -26,7 +26,7 @@ export class UsersService {
   async createUser({ name, email, password, role = Role.USER, googleId = null }: CreateUserParams) {
     const existing = await this.prisma.user.findUnique({ where: { email } });
     if (existing) {
-      throw new ConflictException('Email is already registered');
+      throw new ConflictException('A user with this email already exists.');
     }
 
     const hashed = password ? await bcrypt.hash(password, 10) : null;
@@ -65,7 +65,7 @@ export class UsersService {
       select: { id: true, name: true, email: true, role: true, createdAt: true },
     });
     if (!user) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('User not found.');
     }
     return user;
   }
@@ -73,7 +73,7 @@ export class UsersService {
   async deleteUser(id: number) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('User not found.');
     }
     await this.prisma.user.delete({ where: { id } });
     return { success: true };
@@ -82,13 +82,13 @@ export class UsersService {
   async updateUser(id: number, dto: UpdateUserDto) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing) {
-      throw new NotFoundException('User not found');
+      throw new NotFoundException('User not found.');
     }
 
     if (dto.email && dto.email !== existing.email) {
       const emailTaken = await this.prisma.user.findUnique({ where: { email: dto.email } });
       if (emailTaken) {
-        throw new ConflictException('Email is already registered');
+        throw new ConflictException('This email is already in use.');
       }
     }
 

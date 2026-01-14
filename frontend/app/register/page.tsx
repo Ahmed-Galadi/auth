@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ParticlesBackground from '@/components/ParticlesBackground';
+import FormError from '@/components/FormError';
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -25,11 +26,11 @@ export default function RegisterPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'Registration failed');
+        throw new Error(data.message || 'Registration failed. Please try again.');
       }
       router.push('/login');
     } catch (err: any) {
-      setError(err.message || 'Registration failed');
+      setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -87,7 +88,9 @@ export default function RegisterPage() {
                 required
               />
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            
+            {error && <FormError message={error} />}
+            
             <button
               type="submit"
               disabled={loading}

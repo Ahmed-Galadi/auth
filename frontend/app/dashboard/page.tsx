@@ -1,6 +1,7 @@
 import { cookies } from 'next/headers';
 import { jwtDecode } from 'jwt-decode';
 import LogoutButton from '@/components/LogoutButton';
+import ParticlesBackground from '@/components/ParticlesBackground';
 
 interface JwtPayload {
   userId: number;
@@ -33,19 +34,22 @@ export default async function DashboardPage() {
   const profile = await fetchProfile(token);
 
   return (
-    <div className="w-full max-w-3xl rounded-2xl border border-slate-800/70 bg-slate-900/70 p-8 shadow-glow backdrop-blur">
+    <>
+      <ParticlesBackground />
+      
+      <div className="relative z-10 w-full max-w-3xl border border-white/5 bg-surface p-8 shadow-glow-lg">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-white">Dashboard</h1>
+          <h1 className="font-display text-2xl font-semibold text-white">Dashboard</h1>
           <p className="text-sm text-slate-400">Welcome back, {user.email}</p>
         </div>
         <div className="flex gap-2 text-xs">
-          <span className="rounded-full border border-brand/50 bg-brand/15 px-3 py-1 text-brand-2">User ID: {user.userId}</span>
+          <span className="rounded-full border border-accent/50 bg-accent/15 px-3 py-1 text-accent">User ID: {user.userId}</span>
           <span className="rounded-full border border-emerald-600/40 bg-emerald-500/15 px-3 py-1 text-emerald-200">Role: {user.role}</span>
         </div>
       </div>
 
-      <div className="mt-6 rounded-xl border border-slate-800 bg-slate-950/50 p-4">
+      <div className="mt-6 border border-white/10 bg-primary/60 p-4">
         <pre className="text-sm text-slate-100">{JSON.stringify(profile, null, 2)}</pre>
       </div>
 
@@ -53,5 +57,6 @@ export default async function DashboardPage() {
         <LogoutButton />
       </div>
     </div>
+    </>
   );
 }

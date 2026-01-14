@@ -38,7 +38,7 @@ export class AdminController {
   async deleteUser(@Param('id') id: string, @Req() req: any) {
     const userId = Number(id);
     if (req.user?.userId === userId) {
-      throw new ForbiddenException('Cannot delete your own account');
+      throw new ForbiddenException('You cannot delete your own account.');
     }
     await this.usersService.deleteUser(userId);
     return { success: true };
@@ -48,7 +48,7 @@ export class AdminController {
   async updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req: any) {
     const userId = Number(id);
     if (req.user?.userId === userId && dto.role && dto.role !== req.user.role) {
-      throw new ForbiddenException('Cannot change your own role');
+      throw new ForbiddenException('You cannot change your own role.');
     }
     return this.usersService.updateUser(userId, dto);
   }

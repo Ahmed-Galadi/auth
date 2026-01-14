@@ -62,7 +62,7 @@ export class AuthService {
 
   async register(dto: RegisterDto) {
     if (!dto.password) {
-      throw new ConflictException('Password is required');
+      throw new ConflictException('Password is required.');
     }
     const user = await this.usersService.createUser(dto);
     const payload: JwtPayload = {
@@ -87,11 +87,11 @@ export class AuthService {
   async validateLocalUser(email: string, password: string) {
     const user = await this.usersService.findByEmail(email);
     if (!user || !user.password) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password.');
     }
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Invalid email or password.');
     }
     return user;
   }
@@ -132,11 +132,11 @@ export class AuthService {
   async validateRefreshToken(userId: number, refreshToken: string) {
     const user = await this.usersService.findByIdWithSecrets(userId);
     if (!user || !user.hashedRefreshToken) {
-      throw new ForbiddenException('Access denied');
+      throw new UnauthorizedException('Invalid refresh token. Please sign in again.');
     }
     const tokenMatches = await bcrypt.compare(refreshToken, user.hashedRefreshToken);
     if (!tokenMatches) {
-      throw new ForbiddenException('Access denied');
+      throw new UnauthorizedException('Session expired. Please sign in again.');
     }
     return user;
   }

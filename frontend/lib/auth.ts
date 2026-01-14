@@ -22,6 +22,24 @@ class HttpError extends Error {
 
 const baseHeaders = { "Content-Type": "application/json" };
 
+/**
+ * Extract a user-friendly error message from backend response
+ */
+function extractErrorMessage(errorBody: any, fallback: string): string {
+  if (!errorBody) return fallback;
+  
+  // NestJS returns { message: string | string[], error: string, statusCode: number }
+  if (errorBody.message) {
+    // If message is an array (validation errors), join them
+    if (Array.isArray(errorBody.message)) {
+      return errorBody.message.join('. ');
+    }
+    return errorBody.message;
+  }
+  
+  return fallback;
+}
+
 export async function loginRequest(body: { email: string; password: string }) {
   const res = await fetch(`${BACKEND_URL}/auth/signin`, {
     method: "POST",
@@ -29,8 +47,9 @@ export async function loginRequest(body: { email: string; password: string }) {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new HttpError(text || "Login failed", res.status);
+    const errorBody = await res.json().catch(() => null);
+    const message = extractErrorMessage(errorBody, "Login failed. Please try again.");
+    throw new HttpError(message, res.status);
   }
   return (await res.json()) as AuthResponse;
 }
@@ -42,8 +61,9 @@ export async function registerRequest(body: { email: string; password: string; n
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const text = await res.text();
-    throw new HttpError(text || "Register failed", res.status);
+    const errorBody = await res.json().catch(() => null);
+    const message = extractErrorMessage(errorBody, "Registration failed. Please try again.");
+    throw new HttpError(message, res.status);
   }
   return (await res.json()) as AuthResponse;
 }

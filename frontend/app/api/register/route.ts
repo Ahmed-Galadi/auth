@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json();
   const parsed = registerSchema.safeParse(body);
   if (!parsed.success) {
-    return new Response(JSON.stringify({ message: "Invalid registration data" }), {
+    return new Response(JSON.stringify({ message: "Please provide valid registration details." }), {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error: unknown) {
-    const status = (error as any)?.status ?? 400;
-    const message = error instanceof Error ? error.message : "Registration failed";
+    const status = (error as any)?.status ?? 500;
+    const message = error instanceof Error ? error.message : "Registration failed. Please try again.";
     return new Response(JSON.stringify({ message }), {
       status,
       headers: { "Content-Type": "application/json" },

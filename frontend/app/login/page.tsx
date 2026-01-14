@@ -4,6 +4,7 @@ import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import ParticlesBackground from '@/components/ParticlesBackground';
+import FormError from '@/components/FormError';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,7 +25,7 @@ export default function LoginPage() {
       });
       const data = await res.json();
       if (!res.ok) {
-        throw new Error(data.message || 'Login failed');
+        throw new Error(data.message || 'Login failed. Please try again.');
       }
 
       if (data.user?.role === 'ADMIN') {
@@ -33,7 +34,7 @@ export default function LoginPage() {
         router.push('/dashboard');
       }
     } catch (err: any) {
-      setError(err.message || 'Login failed');
+      setError(err.message || 'An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -80,7 +81,9 @@ export default function LoginPage() {
                 required
               />
             </div>
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            
+            {error && <FormError message={error} />}
+            
             <button
               type="submit"
               disabled={loading}
