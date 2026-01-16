@@ -126,6 +126,31 @@ NODE_ENV=development
 - **Values**: `development`, `production`, `test`
 - **Default**: `development`
 
+### Google OAuth (Optional)
+```bash
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+```
+- **Purpose**: Google OAuth 2.0 Client ID for "Sign in with Google"
+- **Used by**: Backend (Google OAuth strategy)
+- **Default**: Placeholder value (won't work until replaced with real credentials)
+- **How to get**: See section "8. Google OAuth Setup (Optional)" below
+
+```bash
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+```
+- **Purpose**: Google OAuth 2.0 Client Secret
+- **Used by**: Backend (Google OAuth strategy)
+- **Security**: Keep this secret! Never commit to git
+- **How to get**: See section "8. Google OAuth Setup (Optional)" below
+
+```bash
+GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
+```
+- **Purpose**: Where Google redirects after user authenticates
+- **Used by**: Backend (Google OAuth strategy)
+- **Format**: `http://localhost:3001/auth/google/callback` (development)
+- **Production**: Change to `https://yourdomain.com/auth/google/callback`
+
 ---
 
 ## 3. Creating Users and Admins
@@ -274,6 +299,8 @@ docker exec -it smartdocs-postgres psql -U smartdocs_user -d smartdocs_db -c "SE
 - [ ] Set `NODE_ENV=production`
 - [ ] Never commit `.env` file to git
 - [ ] Use environment-specific `.env` files for different environments
+- [ ] If using Google OAuth: Create production credentials and update callback URLs
+- [ ] If using Google OAuth: Publish OAuth consent screen (remove testing mode)
 
 ---
 
@@ -298,3 +325,202 @@ docker exec -it smartdocs-postgres psql -U smartdocs_user -d smartdocs_db -c "DE
 ```bash
 docker exec -it smartdocs-postgres psql -U smartdocs_user -d smartdocs_db
 ```
+
+---
+
+## 8. Google OAuth Setup (Optional)
+
+The "Sign in with Google" button is already integrated in the login and register pages. To activate it:
+
+### Why Use Google OAuth?
+- ✅ Users can sign in with their Google account (no password needed)
+- ✅ Faster registration and login
+- ✅ Leverages Google's security
+- ✅ Optional - your app works perfectly without it
+
+### Step 1: Create Google OAuth Credentials
+
+1. **Go to Google Cloud Console**
+   - Visit: https://console.cloud.google.com/
+
+2. **Create a Project** (or select existing)
+   - Click "Select a project" → "New Project"
+   - Name: `SmartDocs Auth` (or any name you prefer)
+   - Click "Create"
+
+3. **Enable Google+ API**
+   - In the left menu: **APIs & Services** → **Library**
+   - Search for "Google+ API"
+   - Click it and press "Enable"
+
+4. **Configure OAuth Consent Screen**
+   - Go to: **APIs & Services** → **OAuth consent screen**
+   - User Type: Select **"External"**
+   - Click "Create"
+   - Fill in required fields:
+     - **App name**: `SmartDocs` (or your app name)
+     - **User support email**: Your email
+     - **Developer contact**: Your email
+   - Click "Save and Continue"
+   - **Scopes**: Click "Add or Remove Scopes"
+     - Select: `.../auth/userinfo.email` and `.../auth/userinfo.profile`
+     - Click "Update" → "Save and Continue"
+   - **Test users**: Add your Gmail address for testing
+   - Click "Save and Continue"
+
+5. **Create OAuth 2.0 Credentials**
+   - Go to: **APIs & Services** → **Credentials**
+   - Click **"+ Create Credentials"** → **"OAuth 2.0 Client ID"**
+   - Application type: **Web application**
+   - Name: `SmartDocs Web Client`
+   - **Authorized JavaScript origins**:
+     - Add: `http://localhost:3000`
+     - Add: `http://localhost:3001`
+   - **Authorized redirect URIs**:
+     - Add: `http://localhost:3001/auth/google/callback`
+   - Click "Create"
+
+6. **Copy Your Credentials**
+   - You'll see a popup with:
+     - **Client ID**: Something like `123456789-abcdefg...apps.googleusercontent.com`
+     - **Client Secret**: Something like `GOCSPX-abc123def456...`
+   - **Save these!** You'll need them in the next step
+
+### Step 2: Update Your `.env` File
+
+Open `.env` in the root directory and replace the placeholder values:
+
+```bash
+# Replace these lines:
+GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
+
+# With your actual values from Google Console:
+GOOGLE_CLIENT_ID=123456789-abcdefghijklmnop.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-abc123def456ghi789
+GOOGLE_CALLBACK_URL=http://localhost:3001/auth/google/callback
+```
+
+### Step 3: Restart Docker Containers
+
+```bash
+docker-compose down
+docker-compose up -d
+```
+
+### Step 4: Test Google OAuth
+
+1. Visit: http://localhost:3000/login
+2. Click the **"Sign in with Google"** button
+3. You'll be redirected to Google's login page
+4. Sign in with your Gmail account
+5. Grant permission: "Allow SmartDocs to access email and profile"
+6. You'll be redirected back and logged in automatically!
+
+### How Google OAuth Works in Your App
+
+```
+User clicks "Sign in with Google"
+   ↓
+Redirects to backend: http://localhost:3001/auth/google/login
+   ↓
+Backend redirects to Google OAuth page
+   ↓
+User signs in with Gmail and grants permission
+   ↓
+Google redirects back with code: http://localhost:3001/auth/google/callback?code=...
+   ↓
+Backend:
+  - Validates code with Google
+  - Gets user info (email, name, Google ID)
+  - Creates new user OR links Google to existing email
+  - Generates JWT tokens
+  - Sets cookies
+  - Redirects to frontend: http://localhost:3000/auth/google/callback?success=true
+   ↓
+Frontend redirects to dashboard
+   ↓
+✅ User is logged in!
+```
+
+### Database Behavior with Google OAuth
+
+**First-time Google user:**
+```sql
+INSERT INTO "User" (email, name, googleId, password, role)
+VALUES ('user@gmail.com', 'User Name', 'google-id-123', NULL, 'USER');
+```
+- `password` is `NULL` (Google users don't have passwords)
+- `googleId` stores Google's unique identifier
+
+**Existing email + Google login:**
+```sql
+UPDATE "User" 
+SET googleId = 'google-id-123'
+WHERE email = 'user@gmail.com';
+```
+- Links Google account to existing user
+- User can now login with both email/password AND Google
+
+### Troubleshooting Google OAuth
+
+#### Error: "redirect_uri_mismatch"
+**Problem**: Callback URL doesn't match Google Console configuration
+
+**Solution**: 
+- Go to Google Console → Credentials → Your OAuth Client
+- Verify "Authorized redirect URIs" contains exactly:
+  ```
+  http://localhost:3001/auth/google/callback
+  ```
+
+#### Error: "Access blocked: This app's request is invalid"
+**Problem**: OAuth consent screen not properly configured
+
+**Solution**: Complete Step 1.4 above (OAuth consent screen setup)
+
+#### Backend logs show: "Google OAuth not configured"
+**Problem**: Environment variables not loaded
+
+**Solution**:
+1. Verify `.env` has real values (not placeholders starting with "your-")
+2. Restart containers: `docker-compose down && docker-compose up -d`
+3. Check logs: `docker-compose logs backend | grep -i google`
+
+#### Google button doesn't redirect
+**Problem**: Frontend can't reach backend
+
+**Solution**: Verify `BACKEND_URL=http://backend:3001` in `.env` (NOT localhost)
+
+### Production Deployment for Google OAuth
+
+Before deploying to production:
+
+1. **Create production OAuth credentials** in Google Console
+2. **Add production domains** to authorized origins:
+   - `https://yourdomain.com`
+   - `https://api.yourdomain.com` (if separate)
+3. **Update authorized redirect URIs**:
+   - `https://yourdomain.com/auth/google/callback`
+4. **Update `.env` for production**:
+   ```bash
+   GOOGLE_CLIENT_ID=<production-client-id>
+   GOOGLE_CLIENT_SECRET=<production-client-secret>
+   GOOGLE_CALLBACK_URL=https://yourdomain.com/auth/google/callback
+   NEXT_PUBLIC_APP_URL=https://yourdomain.com
+   ```
+5. **Publish OAuth consent screen** (remove testing mode)
+6. **Test thoroughly** on production domain
+
+### Security Notes for Google OAuth
+
+- ✅ Google users have `password = NULL` in database (can't use email/password login)
+- ✅ Tokens are still httpOnly cookies (JavaScript can't access)
+- ✅ Refresh tokens are hashed in database
+- ✅ Same token rotation and refresh flow as email/password
+- ✅ Account linking prevents duplicate users with same email
+
+---
+
+## 9. Additional Resources

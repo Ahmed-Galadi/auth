@@ -64,7 +64,27 @@ export class AuthController {
       email: user.email,
       role: user.role,
     });
-    return res.json(authResponse);
+    
+    // Redirect to frontend callback page with tokens in URL
+    const frontendUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+    const redirectUrl = `${frontendUrl}/auth/google/callback?success=true`;
+    
+    // Set tokens as cookies for the frontend
+    res.cookie('token', authResponse.accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 15 * 60 * 1000, // 15 minutes
+    });
+    
+    res.cookie('refreshToken', authResponse.refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    });
+    
+    return res.redirect(redirectUrl);
   }
 
   @Post('signout')
