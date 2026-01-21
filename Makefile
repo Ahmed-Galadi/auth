@@ -2,7 +2,7 @@ DC ?= docker compose
 
 .PHONY: up down clean logs db-push
 
-# Bring up Postgres, push Prisma schema, then start all services
+# Bring up Postgres > push Prisma schema > then start all services
 up: db-push
 	@echo "Starting all services..."
 	@$(DC) up -d

@@ -1,0 +1,112 @@
+// 1. Input payload
+{
+  sub: 123,
+  email: "ahmed@example.com",
+  role: "USER",
+  name: "ahmed galadi"
+}
+
+// 2. Add timestamps (jsonwebtoken does this automatically)
+{
+  sub: 123,
+  email: "ahmed@example.com",
+  role: "USER",
+  name: "ahmed galadi",
+  iat: 1737387600,  // ← Issued at (Unix timestamp)
+  exp: 1737388500   // ← Expires at (iat + 15 minutes)
+}
+
+// 3. Create header
+{
+  "alg": "HS256",  // HMAC-SHA256
+  "typ": "JWT"
+}
+
+// 4. Base64URL encode header
+const headerB64 = base64UrlEncode(JSON.stringify(header));
+// "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"
+
+// 5. Base64URL encode payload
+const payloadB64 = base64UrlEncode(JSON.stringify(payload));
+// "eyJzdWIiOjEyMywiZW1haWwiOiJqb2huQGV4YW1wbGUuY29tIiwicm9sZSI6IlVTRVIiLCJuYW1lIjoiSm9obiBEb2UiLCJpYXQiOjE3MzczODc2MDAsImV4cCI6MTczNzM4ODUwMH0"
+
+// 6. Create signature using HMAC-SHA256
+const signature = HMAC_SHA256(
+  headerB64 + '.' + payloadB64,
+  'your-super-secret-key-change-in-production'  // ← Secret from .env
+);
+
+// 7. Base64URL encode signature
+const signatureB64 = base64UrlEncode(signature);
+
+// 8. Combine into final JWT
+const jwt = headerB64 + '.' + payloadB64 + '.' + signatureB64;
+// "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOjEyMywiZW1haWwiOiJqb2huQGV4YW1wbGUuY29tIiwicm9sZSI6IlVTRVIiLCJuYW1lIjoiSm9obiBEb2UiLCJpYXQiOjE3MzczODc2MDAsImV4cCI6MTczNzM4ODUwMH0.4Adcj_rGwZfCvNPJZu5D-tlU01-2KMFK-qUAaZ_OdVk"
+
+// --------------------- WORK FLOW WITH TOKENS ---------------------------------
+User logs in
+    ↓
+Backend generates access token with user info
+    ↓
+Frontend stores token in cookie
+    ↓
+User makes request: GET /users/me
+Headers: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    ↓
+Backend decodes token → "Oh, you're user ID 123 with role USER!"
+    ↓
+Returns user data ✅
+
+
+// ----------------------------- REQUEST ------------------------------------- 
+// Every request (except @Public() routes) goes through this:
+
+Request arrives → JwtAuthGuard intercepts
+       ↓
+JwtStrategy extracts token from "Authorization: Bearer ..."
+       ↓
+Verifies signature using BACKEND_JWT_SECRET
+       ↓
+Checks expiration (current time < exp timestamp?)
+       ↓
+If valid → Decodes payload → Attaches to req.user
+       ↓
+Controller receives request with req.user populated:
+{
+  userId: 123,
+  email: "user@example.com",
+  role: "USER",
+  name: "John Doe"
+}
+//------------------------------- ACCESS TOKEN EXPIRATION --------------------------------
+// Minute 0: User logs in
+Access Token:  Valid until minute 15 ✅
+Refresh Token: Valid until day 7 ✅
+
+// Minute 16: User makes request
+Frontend → GET /users/me
+           Authorization: Bearer <expired_access_token>
+           ↓
+Backend → 401 Unauthorized (token expired)
+           ↓
+Frontend intercepts 401 error
+           ↓
+Frontend → POST /auth/refresh
+           Authorization: Bearer <refresh_token>
+           ↓
+Backend validates refresh token:
+  1. Verify signature (BACKEND_REFRESH_SECRET)
+  2. Check expiration (still valid for 7 days)
+  3. Check hashed version matches database
+           ↓
+Backend → Returns NEW tokens:
+{
+  accessToken: "new_15_minute_token",
+  refreshToken: "new_7_day_token"
+}
+           ↓
+Frontend stores new tokens in cookies
+           ↓
+Frontend retries original request with new access token
+           ↓
+Success! ✅

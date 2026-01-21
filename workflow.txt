@@ -1,0 +1,30 @@
+User fills form → Frontend validates (Zod)
+                         ↓
+        POST /api/register (Next.js API route)
+                         ↓
+        Calls registerRequest() → POST /auth/signup (Backend)
+                         ↓
+        AuthController.signup() [@Public decorator]
+                         ↓
+        Validates RegisterDto (class-validator)
+                         ↓
+        AuthService.register()
+                         ↓
+        UsersService.createUser()
+                         ↓
+        1. Check if email exists (Prisma)
+        2. Hash password (bcrypt, 10 rounds)
+        3. INSERT into PostgreSQL (role defaults to 'USER')
+                         ↓
+        Generate JWT tokens (access: 15m, refresh: 7d)
+                         ↓
+        Hash refresh token and store in DB
+                         ↓
+        Return { accessToken, refreshToken, user }
+                         ↓
+        Frontend sets 3 httpOnly cookies:
+        - session (signed with jose)
+        - token (access token)
+        - refreshToken
+                         ↓
+        Redirect to /dashboard (or /admin if ADMIN role)

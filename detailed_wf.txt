@@ -1,0 +1,474 @@
+Ahmed-Galadi: read my code deeply and continue the work flow of registration from this line "const res = await fetch${BACKEND_URL}/auth/signup, {
+			method: "POST",
+			headers: baseHeaders,
+			body: JSON.stringify(body),
+  })" what happens next when the front end sends the user input to the backend ? how it does get stored in the db ? also mention what my controlers do and how my roles are respected  
+
+Workspace: Collecting workspace information# Registration Workflow Deep Dive
+
+Let me trace the complete registration flow from when the frontend sends the user input to when it's stored in the database.
+
+## 1. Frontend Initiates Registration
+
+Starting from auth.ts:
+
+```ts
+export async function registerRequest(body: { email: string; password: string; name: string }) {
+  const res = await fetch(`${BACKEND_URL}/auth/signup`, {
+    method: "POST",
+    headers: baseHeaders,
+    body: JSON.stringify(body),
+  });
+```
+
+This sends a POST request to `http://backend:3001/auth/signup` with the user's name, email, and password.
+
+## 2. Backend Controller Receives Request
+
+The request hits auth.controller.ts:
+
+```ts
+@Controller('auth')
+export class AuthController {
+  @Public()  // ← Bypasses global JWT guard (unauthenticated users can access)
+  @Post('signup')
+  async signup(@Body() dto: RegisterDto) {
+    return this.authService.register(dto);
+  }
+}
+```
+
+**What happens here:**
+- The `@Public()` decorator marks this route as accessible without authentication
+- NestJS validation pipes automatically validate the request body against `RegisterDto`:
+  ```ts
+  export class RegisterDto {
+    @IsString()
+    @MinLength(2)
+    name!: string;
+
+    @IsEmail()
+    email!: string;
+
+    @MinLength(6)
+    password!: string;
+
+    @IsOptional()
+    @IsEnum(Role)
+    role?: Role;  // Defaults to USER if not provided
+  }
+  ```
+- If validation fails, NestJS automatically returns a 400 error with validation messages
+- If validation passes, the controller calls `AuthService.register()`
+
+## 3. AuthService Processes Registration
+
+In auth.service.ts:
+
+```ts
+async register(dto: RegisterDto) {
+  if (!dto.password) {
+    throw new ConflictException('Password is required.');
+  }
+  // Calls UsersService to create the user
+  const user = await this.usersService.createUser(dto);
+  
+  // Generate JWT tokens
+  const payload: JwtPayload = {
+    sub: user.id,
+    email: user.email,
+    role: user.role,
+    name: user.name,
+  };
+  const tokens = await this.generateTokens(payload);
+  
+  // Store hashed refresh token in DB
+  await this.usersService.setHashedRefreshToken(
+    user.id,
+    await this.hashData(tokens.refreshToken),
+  );
+
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    user,
+  };
+}
+```
+
+## 4. UsersService Creates User in Database
+
+In users.service.ts:
+
+```ts
+async createUser({ name, email, password, role = Role.USER, googleId = null }: CreateUserParams) {
+  // Check if email already exists
+  const existing = await this.prisma.user.findUnique({ where: { email } });
+  if (existing) {
+    throw new ConflictException('A user with this email already exists.');
+  }
+
+  // Hash the password (bcrypt with 10 salt rounds)
+  const hashed = password ? await bcrypt.hash(password, 10) : null;
+  
+  // Create user in PostgreSQL via Prisma
+  return this.prisma.user.create({
+    data: { 
+      name, 
+      email, 
+      password: hashed,  // ← Hashed password stored
+      role,              // ← Defaults to 'USER' if not specified
+      googleId 
+    },
+    select: { id: true, name: true, email: true, role: true, createdAt: true },
+  });
+}
+```
+
+**Database Storage:**
+- Prisma ORM translates this to a SQL INSERT statement
+- Data is stored in PostgreSQL in the `User` table defined in schema.prisma
+- The password is **never stored in plain text** - only the bcrypt hash
+
+## 5. Token Generation
+
+Back in `AuthService.generateTokens()`:
+
+```ts
+private async generateTokens(payload: JwtPayload) {
+  const accessSecret = this.configService.get<string>('JWT_SECRET') || 
+                       this.configService.get<string>('BACKEND_JWT_SECRET');
+  const accessExpires = this.configService.get<string>('JWT_EXPIRES_IN') || '15m';
+
+  const refreshSecret = this.configService.get<string>('REFRESH_SECRET') || 
+                        this.configService.get<string>('BACKEND_REFRESH_SECRET') || 
+                        accessSecret;
+  const refreshExpires = this.configService.get<string>('REFRESH_EXPIRES_IN') || '7d';
+
+  const accessToken = await this.jwtService.signAsync(payload, {
+    secret: accessSecret,
+    expiresIn: accessExpires,
+  });
+
+  const refreshToken = await this.jwtService.signAsync(payload, {
+    secret: refreshSecret,
+    expiresIn: refreshExpires,
+  });
+
+  return { accessToken, refreshToken };
+}
+```
+
+The JWT payload contains:
+```ts
+{
+  sub: userId,      // User ID
+  email: userEmail,
+  role: userRole,   // 'USER' or 'ADMIN'
+  name: userName
+}
+```
+
+## 6. Refresh Token Storage
+
+In `UsersService.setHashedRefreshToken()`:
+
+```ts
+async setHashedRefreshToken(userId: number, hashedRefreshToken: string | null) {
+  await this.prisma.user.update({
+    where: { id: userId },
+    data: { hashedRefreshToken },
+  });
+}
+```
+
+The refresh token is hashed (bcrypt) and stored in the `hashedRefreshToken` column for later validation.
+
+## 7. Response Returns to Frontend
+
+The response flows back through the controller to route.ts:
+
+```ts
+const data = await registerRequest(parsed.data);
+
+// Clear any existing sessions
+clearSession();
+clearLegacyTokenCookie();
+clearRefreshTokenCookie();
+
+// Create new session cookie (signed with jose)
+await createSession({
+  sub: data.user.id,
+  email: data.user.email,
+  role: data.user.role,
+});
+
+// Set access and refresh token cookies
+setLegacyTokenCookie(data.accessToken);
+setRefreshTokenCookie(data.refreshToken);
+
+return new Response(JSON.stringify({ user: data.user }), {
+  status: 201,
+  headers: { "Content-Type": "application/json" },
+});
+```
+
+## 8. Frontend Stores Cookies
+
+Three httpOnly cookies are set by `lib/session.ts` and `lib/auth.ts`:
+
+1. **`session`** - Signed JWT with user info (verified by frontend middleware)
+2. **`token`** - Access token (sent to backend in Authorization header)
+3. **`refreshToken`** - Refresh token (used to get new access tokens)
+
+---
+
+# How Controllers Work
+
+## Global Guards in App Module
+
+In app.module.ts:
+
+```ts
+@Module({
+  providers: [
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,  // ← Protects ALL routes by default
+    },
+    {
+      provide: APP_GUARD,
+      useClass: RolesGuard,    // ← Checks role requirements
+    },
+  ],
+})
+export class AppModule {}
+```
+
+**Default Behavior:**
+- **Every route requires JWT authentication** (via `JwtAuthGuard`)
+- Routes must explicitly use `@Public()` decorator to bypass this
+
+## Public Routes (No Auth Required)
+
+From auth.controller.ts:
+
+```ts
+@Public()  // ← Bypasses JwtAuthGuard
+@Post('signup')
+async signup(@Body() dto: RegisterDto) {
+  return this.authService.register(dto);
+}
+
+@Public()
+@Post('signin')
+async signin(@Req() req: any) {
+  return this.authService.loginWithUser(req.user);
+}
+```
+
+## Protected Routes (Auth Required)
+
+From users.controller.ts:
+
+```ts
+@Controller('users')
+export class UsersController {
+  @UseGuards(JwtAuthGuard)  // ← Explicitly requires JWT (redundant due to global guard)
+  @Get('me')
+  async getMe(@Req() req: any) {
+    return this.usersService.findById(req.user.userId);
+  }
+}
+```
+
+The user object is populated by `JwtStrategy`:
+
+```ts
+async validate(payload: JwtPayload) {
+  return { 
+    userId: payload.sub, 
+    role: payload.role, 
+    email: payload.email, 
+    name: payload.name 
+  };
+}
+```
+
+---
+
+# How Roles Are Enforced
+
+## 1. Role Decorator
+
+From roles.decorator.ts:
+
+```ts
+export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
+```
+
+This attaches metadata to routes specifying which roles can access them.
+
+## 2. RolesGuard Checks Metadata
+
+From roles.guard.ts:
+
+```ts
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    // Get required roles from @Roles() decorator
+    const requiredRoles = this.reflector.getAllAndOverride<string[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    
+    // If no roles specified, allow access
+    if (!requiredRoles || requiredRoles.length === 0) {
+      return true;
+    }
+
+    const request = context.switchToHttp().getRequest();
+    const user = request.user;  // ← Populated by JwtStrategy
+    
+    // Check if user has required role
+    if (!user || !requiredRoles.includes(user.role)) {
+      throw new ForbiddenException('Insufficient permissions');
+    }
+
+    return true;
+  }
+}
+```
+
+## 3. Admin-Only Routes
+
+From admin.controller.ts:
+
+```ts
+@Controller('admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.ADMIN)  // ← ALL routes in this controller require ADMIN role
+export class AdminController {
+  @Get('users')
+  async listUsers() {
+    return this.usersService.listUsers();
+  }
+
+  @Post('users')
+  async createUser(@Body() dto: RegisterDto) {
+    return this.usersService.createUser(dto);
+  }
+
+  @Delete('users/:id')
+  async deleteUser(@Param('id') id: string, @Req() req: any) {
+    const userId = Number(id);
+    // Prevent self-deletion
+    if (req.user?.userId === userId) {
+      throw new ForbiddenException('You cannot delete your own account.');
+    }
+    await this.usersService.deleteUser(userId);
+    return { success: true };
+  }
+
+  @Patch('users/:id')
+  async updateUser(@Param('id') id: string, @Body() dto: UpdateUserDto, @Req() req: any) {
+    const userId = Number(id);
+    // Prevent admins from demoting themselves
+    if (req.user?.userId === userId && dto.role && dto.role !== req.user.role) {
+      throw new ForbiddenException('You cannot change your own role.');
+    }
+    return this.usersService.updateUser(userId, dto);
+  }
+}
+```
+
+**Role Enforcement Flow:**
+1. JwtAuthGuard validates the access token
+2. JwtStrategy extracts `role` from token and adds to `req.user`
+3. RolesGuard checks if `req.user.role` matches `@Roles(Role.ADMIN)`
+4. If role doesn't match → `403 Forbidden`
+5. If role matches → Request proceeds to controller
+
+## 4. Frontend Middleware Enforces Roles
+
+From middleware.ts:
+
+```ts
+export async function middleware(req: NextRequest) {
+  const session = await readSession(req);
+  const role = session?.role;
+  const isAdmin = pathname.startsWith("/admin");
+
+  // Non-admins cannot access /admin routes
+  if (isAuthenticated && isAdmin && role !== "ADMIN") {
+    const dashboardUrl = new URL("/dashboard", req.url);
+    return NextResponse.redirect(dashboardUrl);
+  }
+
+  return NextResponse.next();
+}
+```
+
+---
+
+# Complete Registration Flow Diagram
+
+```
+User fills form → Frontend validates (Zod)
+                         ↓
+        POST /api/register (Next.js API route)
+                         ↓
+        Calls registerRequest() → POST /auth/signup (Backend)
+                         ↓
+        AuthController.signup() [@Public decorator]
+                         ↓
+        Validates RegisterDto (class-validator)
+                         ↓
+        AuthService.register()
+                         ↓
+        UsersService.createUser()
+                         ↓
+        1. Check if email exists (Prisma)
+        2. Hash password (bcrypt, 10 rounds)
+        3. INSERT into PostgreSQL (role defaults to 'USER')
+                         ↓
+        Generate JWT tokens (access: 15m, refresh: 7d)
+                         ↓
+        Hash refresh token and store in DB
+                         ↓
+        Return { accessToken, refreshToken, user }
+                         ↓
+        Frontend sets 3 httpOnly cookies:
+        - session (signed with jose)
+        - token (access token)
+        - refreshToken
+                         ↓
+        Redirect to /dashboard (or /admin if ADMIN role)
+```
+
+---
+
+# Role Assignment Summary
+
+**Default Registration:**
+- All self-registered users get `Role.USER` by default
+- Defined in `UsersService.createUser()`: `role = Role.USER`
+
+**Creating ADMIN Users:**
+
+**Option 1: Manual Database Promotion** (from SETUP_GUIDE.md):
+```bash
+docker exec -it smartdocs-postgres psql -U smartdocs_user -d smartdocs_db \
+  -c "UPDATE \"User\" SET role = 'ADMIN' WHERE email = 'admin@example.com';"
+```
+
+**Option 2: Admin Creates Admin** (via `/admin/users`):
+- Existing ADMIN can create new users with ADMIN role via `CreateUserForm`
+- Sends to `POST /admin/users` with `role: 'ADMIN'` in body
+
+**Role Protection:**
+- Admins **cannot demote themselves** (`AdminController.updateUser()`)
+- Admins **cannot delete themselves** (`AdminController.deleteUser()`)
